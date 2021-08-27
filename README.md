@@ -9,31 +9,29 @@ call stack.
 
 Here is an example:
 ```rust
-   use trycatch::{Exception,throw,catch,CatchError, register_catch};
-
-   // Specificy the exception payload, this can be anytype. It can be reterived later with `Exception::payload()`
-   type Payload = &'static str;
+   use trycatch::{Exception,throw,catch,CatchError};
 
    // Create our custom exception and implement `Exception` trait on it
-   #[derive(Debug)]
-   struct MyE {}
+   struct MyE;
 
-   impl Exception<Payload> for MyE {
-       fn payload(&self) -> Payload {
-           "MyE exception"
+   impl Exception for MyE {
+       // Specify the name the exception.
+       // We can use this to distinguish this exception type and use it to downcast the payload correctly.
+       fn name(&self) -> &'static str {
+           "MyE"
+       }
+       // Specify the exception payload, it can be anytype.
+       fn payload(&self) -> Box<dyn std::any::Any> {
+           Box::new("MyE exception")
        }
    }
-
-   // This method removes panic error messages from exceptions while the guard is alive.
-   // The payload of the exception needs to be specified as a type argument.
-   let _g = register_catch::<Payload>();
 
    // Our example of a call stack.
    fn nested() {
        fn call() {
            fn stack() {
                // throw our exception here
-               throw(MyE {});
+               throw(MyE);
            }
            stack();
        }
@@ -41,12 +39,13 @@ Here is an example:
    }
 
    // Run our normal callstack inside a `catch` call.
-   // `catch` needs to know the payload type.
+   // `catch` needs to know the exception type.
    // The result is `CatchError` which is either an exception or a normal panic
-   let result = catch! {nested() => <Payload>};
+   let result = catch(nested);
 
    if let Err(CatchError::Exception(e)) = result {
-       assert_eq!(e.payload(), MyE {}.payload());
+       assert_eq!(e.name(), "MyE");
+       assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "MyE exception");
    } else {
        panic!("test failed");
    }
