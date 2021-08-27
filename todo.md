@@ -1,0 +1,2 @@
+- nested `register_catch`
+- reexport types in `catch` macro
