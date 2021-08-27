@@ -109,10 +109,14 @@ pub fn catch(expr: impl FnOnce() + UnwindSafe) -> Result<(), CatchError> {
 pub trait Exception: 'static + Send {
     /// The name of the exception, useful to figure out the type of dyn exception before
     /// downcasting the payload to a concrete type
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &'static str {
+        unimplemented!()
+    }
 
     /// Arbitrary payload.
-    fn payload(&self) -> Box<dyn Any>;
+    fn payload(&self) -> Box<dyn Any> {
+        unimplemented!()
+    }
 }
 impl Exception for Box<dyn Exception> {
     fn name(&self) -> &'static str {
@@ -164,7 +168,10 @@ fn it() {
 
 #[test]
 fn catch_panics() {
-    assert!(matches!(catch(|| panic!()), Err(CatchError::Panic(_))));
+    assert!(matches!(
+        catch(|| panic!("this is an intended test panic")),
+        Err(CatchError::Panic(_))
+    ));
 }
 
 #[test]
@@ -216,9 +223,50 @@ fn multi_exception() {
     let r = catch(c);
 
     if let Err(CatchError::Exception(e)) = r {
-        assert_eq!(e.name(), "B");
-        assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "B");
+        match e.name() {
+            "A" => assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "A"),
+            "B" => assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "B"),
+            _ => unreachable!(),
+        }
     } else {
         panic!("test failed");
     }
+}
+
+#[test]
+fn simpler() {
+    struct A;
+    impl Exception for A {}
+    assert!(matches!(catch(|| throw(A)), Err(CatchError::Exception(_))))
+}
+
+#[test]
+fn complex() {
+    struct A;
+    impl Exception for A {
+        fn payload(&self) -> Box<dyn Any> {
+            Box::new(B)
+        }
+    }
+    struct B;
+    impl Exception for B {
+        fn name(&self) -> &'static str {
+            "B"
+        }
+    }
+    let excep_b = if let Err(CatchError::Exception(excep_b)) = catch(|| {
+        let excep_b = if let Err(CatchError::Exception(paya)) = catch(|| {
+            throw(A);
+        }) {
+            *paya.payload().downcast::<B>().unwrap()
+        } else {
+            unreachable!()
+        };
+        throw(excep_b);
+    }) {
+        excep_b
+    } else {
+        unreachable!()
+    };
+    assert_eq!(excep_b.name(), "B");
 }
