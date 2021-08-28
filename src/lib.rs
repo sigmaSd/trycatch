@@ -8,7 +8,7 @@
 //!
 //! Here is an example:
 //! ```rust
-//!    use trycatch::{Exception,throw,catch,CatchError};
+//!    use trycatch::{Exception,ExceptionDowncast,throw,catch,CatchError};
 //!
 //!    // Create our custom exception and implement `Exception` trait on it
 //!    #[derive(Exception)]
@@ -27,13 +27,12 @@
 //!    }
 //!
 //!    // Run our normal callstack inside a `catch` call.
-//!    // `catch` needs to know the exception type.
 //!    // The result is `CatchError` which is either an exception or a normal panic
 //!    let result = catch(nested);
 //!
 //!    if let Err(CatchError::Exception(e)) = result {
 //!        assert_eq!(e.name(), "MyE");
-//!        assert!(matches!(*e.into_any().downcast::<MyE>().unwrap(), MyE));
+//!        assert!(matches!(e.downcast::<MyE>(), MyE));
 //!    } else {
 //!        panic!("test failed");
 //!    }
@@ -94,7 +93,7 @@ pub fn catch(expr: impl FnOnce() + UnwindSafe) -> Result<(), CatchError> {
 }
 
 /// User defined exception needs to implement this trait.\
-/// The concrete exception type can be reterived with [Exception::into_any] and [Any::downcast]
+/// The concrete exception type can be retrieved via [ExceptionDowncast::downcast]
 pub trait Exception: 'static + Send {
     /// The name of the exception, useful to figure out the type of dyn exception before
     /// downcasting it to a concrete type
@@ -118,6 +117,19 @@ pub fn throw(e: impl Exception) {
     panic::panic_any(Box::new(e) as Box<dyn Exception>);
 }
 pub use trycatch_derive::Exception;
+/// Helper trait that allows downcasting *Box\<dyn Exception\>* to a concrete exception type
+pub trait ExceptionDowncast {
+    /// Downcast Box<dyn Exception> to a concrete exception type
+    fn downcast<E: Exception>(self) -> E;
+}
+impl ExceptionDowncast for Box<dyn Exception> {
+    fn downcast<T: 'static>(self) -> T {
+        *self
+            .into_any()
+            .downcast::<T>()
+            .expect("Downcasting failed, mismatched type")
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -140,7 +152,7 @@ mod test {
         let r = catch(a);
 
         if let Err(CatchError::Exception(e)) = r {
-            assert!(matches!(*e.into_any().downcast::<MyE>().unwrap(), MyE {}));
+            assert!(matches!(e.downcast::<MyE>(), MyE {}));
         } else {
             panic!("test failed");
         }
@@ -160,7 +172,7 @@ mod test {
         struct E;
         let r = catch(|| throw(E));
         if let Err(CatchError::Exception(e)) = r {
-            assert!(matches!(*e.into_any().downcast::<E>().unwrap(), E));
+            assert!(matches!(e.downcast::<E>(), E));
         } else {
             panic!("test failed");
         }
@@ -181,8 +193,8 @@ mod test {
 
         if let Err(CatchError::Exception(e)) = r {
             match e.name() {
-                "A" => assert!(matches!(*e.into_any().downcast::<A>().unwrap(), A)),
-                "B" => assert!(matches!(*e.into_any().downcast::<B>().unwrap(), B)),
+                "A" => assert!(matches!(e.downcast::<A>(), A)),
+                "B" => assert!(matches!(e.downcast::<B>(), B)),
                 _ => unreachable!(),
             }
         } else {
@@ -210,7 +222,7 @@ mod test {
                 throw(A(B));
             }) {
                 assert_eq!(excep_a.name(), "A");
-                *excep_a.into_any().downcast::<A>().unwrap()
+                excep_a.downcast::<A>()
             } else {
                 unreachable!()
             };
