@@ -9,22 +9,11 @@ call stack.
 
 Here is an example:
 ```rust
-   use trycatch::{Exception,throw,catch,CatchError};
+   use trycatch::{Exception,ExceptionDowncast,throw,catch,CatchError};
 
    // Create our custom exception and implement `Exception` trait on it
+   #[derive(Exception)]
    struct MyE;
-
-   impl Exception for MyE {
-       // Specify the name the exception.
-       // We can use this to distinguish this exception type and use it to downcast the payload correctly.
-       fn name(&self) -> &'static str {
-           "MyE"
-       }
-       // Specify the exception payload, it can be anytype.
-       fn payload(&self) -> Box<dyn std::any::Any> {
-           Box::new("MyE exception")
-       }
-   }
 
    // Our example of a call stack.
    fn nested() {
@@ -39,13 +28,12 @@ Here is an example:
    }
 
    // Run our normal callstack inside a `catch` call.
-   // `catch` needs to know the exception type.
    // The result is `CatchError` which is either an exception or a normal panic
    let result = catch(nested);
 
    if let Err(CatchError::Exception(e)) = result {
        assert_eq!(e.name(), "MyE");
-       assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "MyE exception");
+       assert!(matches!(e.downcast::<MyE>(), MyE));
    } else {
        panic!("test failed");
    }
