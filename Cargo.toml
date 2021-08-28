@@ -2,3 +2,6 @@
 name = "trycatch"
 version = "0.1.0"
 edition = "2018"
+
+[dependencies]
+trycatch-derive = { path = "trycatch-derive/" }

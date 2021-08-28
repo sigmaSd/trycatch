@@ -11,19 +11,8 @@
 //!    use trycatch::{Exception,throw,catch,CatchError};
 //!
 //!    // Create our custom exception and implement `Exception` trait on it
+//!    #[derive(Exception)]
 //!    struct MyE;
-//!
-//!    impl Exception for MyE {
-//!        // Specify the name the exception.
-//!        // We can use this to distinguish this exception type and use it to downcast the payload correctly.
-//!        fn name(&self) -> &'static str {
-//!            "MyE"
-//!        }
-//!        // Specify the exception payload, it can be anytype.
-//!        fn payload(&self) -> Box<dyn std::any::Any> {
-//!            Box::new("MyE exception")
-//!        }
-//!    }
 //!
 //!    // Our example of a call stack.
 //!    fn nested() {
@@ -44,7 +33,7 @@
 //!
 //!    if let Err(CatchError::Exception(e)) = result {
 //!        assert_eq!(e.name(), "MyE");
-//!        assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "MyE exception");
+//!        assert!(matches!(*e.into_any().downcast::<MyE>().unwrap(), MyE));
 //!    } else {
 //!        panic!("test failed");
 //!    }
@@ -105,25 +94,22 @@ pub fn catch(expr: impl FnOnce() + UnwindSafe) -> Result<(), CatchError> {
 }
 
 /// User defined exception needs to implement this trait.\
-/// It can have an arbitrary payload that can be retrieved with with [Exception::payload].
+/// The concrete exception type can be reterived with [Exception::into_any] and [Any::downcast]
 pub trait Exception: 'static + Send {
     /// The name of the exception, useful to figure out the type of dyn exception before
-    /// downcasting the payload to a concrete type
+    /// downcasting it to a concrete type
     fn name(&self) -> &'static str {
         unimplemented!()
     }
-
-    /// Arbitrary payload.
-    fn payload(&self) -> Box<dyn Any> {
-        unimplemented!()
-    }
+    /// Cast Box<dyn Exception> to <dyn Any>, useful inorder to retrieve the concrete exception type.
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 impl Exception for Box<dyn Exception> {
     fn name(&self) -> &'static str {
         (**self).name()
     }
-    fn payload(&self) -> Box<dyn Any> {
-        (**self).payload()
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
     }
 }
 
@@ -131,142 +117,109 @@ impl Exception for Box<dyn Exception> {
 pub fn throw(e: impl Exception) {
     panic::panic_any(Box::new(e) as Box<dyn Exception>);
 }
+pub use trycatch_derive::Exception;
 
-#[test]
-fn it() {
-    struct MyE {}
-    impl Exception for MyE {
-        fn payload(&self) -> Box<dyn Any> {
-            Box::new("MyE exception")
-        }
+#[cfg(test)]
+mod test {
+    use super::*;
 
-        fn name(&self) -> &'static str {
-            "MyE"
-        }
-    }
-    fn a() {
-        fn b() {
-            fn c() {
-                throw(MyE {});
+    #[test]
+    fn it() {
+        #[derive(Exception)]
+        struct MyE {}
+        fn a() {
+            fn b() {
+                fn c() {
+                    throw(MyE {});
+                }
+                c();
             }
-            c();
-        }
-        b();
-    }
-
-    let r = catch(a);
-
-    if let Err(CatchError::Exception(e)) = r {
-        assert_eq!(
-            e.payload().downcast::<&'static str>().unwrap(),
-            MyE {}.payload().downcast::<&'static str>().unwrap()
-        );
-    } else {
-        panic!("test failed");
-    }
-}
-
-#[test]
-fn catch_panics() {
-    assert!(matches!(
-        catch(|| panic!("this is an intended test panic")),
-        Err(CatchError::Panic(_))
-    ));
-}
-
-#[test]
-fn simple() {
-    struct E;
-    impl Exception for E {
-        fn payload(&self) -> Box<dyn Any> {
-            Box::new(())
+            b();
         }
 
-        fn name(&self) -> &'static str {
-            "E"
-        }
-    }
-    let r = catch(|| throw(E));
-    if let Err(CatchError::Exception(e)) = r {
-        assert!(matches!(*e.payload().downcast::<()>().unwrap(), ()));
-    } else {
-        panic!("test failed");
-    }
-}
+        let r = catch(a);
 
-#[test]
-fn multi_exception() {
-    struct A;
-    impl Exception for A {
-        fn payload(&self) -> Box<dyn Any> {
-            Box::new("A")
+        if let Err(CatchError::Exception(e)) = r {
+            assert!(matches!(*e.into_any().downcast::<MyE>().unwrap(), MyE {}));
+        } else {
+            panic!("test failed");
         }
+    }
 
-        fn name(&self) -> &'static str {
-            "A"
-        }
+    #[test]
+    fn catch_panics() {
+        assert!(matches!(
+            catch(|| panic!("this is an intended test panic")),
+            Err(CatchError::Panic(_))
+        ));
     }
-    struct B;
-    impl Exception for B {
-        fn payload(&self) -> Box<dyn Any> {
-            Box::new("B")
-        }
 
-        fn name(&self) -> &'static str {
-            "B"
+    #[test]
+    fn simple() {
+        #[derive(Exception)]
+        struct E;
+        let r = catch(|| throw(E));
+        if let Err(CatchError::Exception(e)) = r {
+            assert!(matches!(*e.into_any().downcast::<E>().unwrap(), E));
+        } else {
+            panic!("test failed");
         }
     }
-    fn c() {
-        throw(B);
-        throw(A);
-    }
-    let r = catch(c);
 
-    if let Err(CatchError::Exception(e)) = r {
-        match e.name() {
-            "A" => assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "A"),
-            "B" => assert_eq!(*e.payload().downcast::<&'static str>().unwrap(), "B"),
-            _ => unreachable!(),
-        }
-    } else {
-        panic!("test failed");
-    }
-}
+    #[test]
+    fn multi_exception() {
+        #[derive(Exception)]
+        struct A;
+        #[derive(Exception)]
+        struct B;
 
-#[test]
-fn simpler() {
-    struct A;
-    impl Exception for A {}
-    assert!(matches!(catch(|| throw(A)), Err(CatchError::Exception(_))))
-}
-
-#[test]
-fn complex() {
-    struct A;
-    impl Exception for A {
-        fn payload(&self) -> Box<dyn Any> {
-            Box::new(B)
-        }
-    }
-    struct B;
-    impl Exception for B {
-        fn name(&self) -> &'static str {
-            "B"
-        }
-    }
-    let excep_b = if let Err(CatchError::Exception(excep_b)) = catch(|| {
-        let excep_b = if let Err(CatchError::Exception(paya)) = catch(|| {
+        fn c() {
+            throw(B);
             throw(A);
+        }
+        let r = catch(c);
+
+        if let Err(CatchError::Exception(e)) = r {
+            match e.name() {
+                "A" => assert!(matches!(*e.into_any().downcast::<A>().unwrap(), A)),
+                "B" => assert!(matches!(*e.into_any().downcast::<B>().unwrap(), B)),
+                _ => unreachable!(),
+            }
+        } else {
+            panic!("test failed");
+        }
+    }
+
+    #[test]
+    fn simpler() {
+        #[derive(Exception)]
+        struct A;
+
+        assert!(matches!(catch(|| throw(A)), Err(CatchError::Exception(_))))
+    }
+
+    #[test]
+    fn complex() {
+        #[derive(Exception)]
+        struct A(B);
+        #[derive(Exception)]
+        struct B;
+
+        let excep_b = if let Err(CatchError::Exception(excep_b)) = catch(|| {
+            let excep_a = if let Err(CatchError::Exception(excep_a)) = catch(|| {
+                throw(A(B));
+            }) {
+                assert_eq!(excep_a.name(), "A");
+                *excep_a.into_any().downcast::<A>().unwrap()
+            } else {
+                unreachable!()
+            };
+            throw(excep_a.0);
         }) {
-            *paya.payload().downcast::<B>().unwrap()
+            excep_b
         } else {
             unreachable!()
         };
-        throw(excep_b);
-    }) {
-        excep_b
-    } else {
-        unreachable!()
-    };
-    assert_eq!(excep_b.name(), "B");
+        assert_eq!(excep_b.name(), "B");
+    }
 }
