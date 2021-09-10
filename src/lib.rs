@@ -40,10 +40,12 @@
 //!
 
 use std::any::Any;
+use std::fmt;
 use std::panic::{self, UnwindSafe};
 
 /// The result of [catch]\
 /// It can be either an exception or a normal panic
+#[derive(Debug)]
 pub enum CatchError {
     /// User exception
     Exception(Box<dyn Exception>),
@@ -52,7 +54,7 @@ pub enum CatchError {
 }
 
 /// Runs a function and catch its exceptions and panics.
-pub fn catch(expr: impl FnOnce() + UnwindSafe) -> Result<(), CatchError> {
+pub fn catch<T>(expr: impl FnOnce() -> T + UnwindSafe) -> Result<T, CatchError> {
     // The the exception needs to be specified as a type argument.
     // This method removes panic error messages from exceptions while the guard is alive.\
     fn register_catch() -> impl Drop {
@@ -94,7 +96,7 @@ pub fn catch(expr: impl FnOnce() + UnwindSafe) -> Result<(), CatchError> {
 
 /// User defined exception needs to implement this trait.\
 /// The concrete exception type can be retrieved via [ExceptionDowncast::downcast]
-pub trait Exception: 'static + Send {
+pub trait Exception: 'static + Send + fmt::Debug {
     /// The name of the exception, useful to figure out the type of dyn exception before
     /// downcasting it to a concrete type
     fn name(&self) -> &'static str {
@@ -113,7 +115,7 @@ impl Exception for Box<dyn Exception> {
 }
 
 /// Throw an exception that can be caught with [catch]
-pub fn throw(e: impl Exception) {
+pub fn throw(e: impl Exception) -> ! {
     panic::panic_any(Box::new(e) as Box<dyn Exception>);
 }
 pub use trycatch_derive::Exception;
@@ -121,15 +123,34 @@ pub use trycatch_derive::Exception;
 pub trait ExceptionDowncast {
     /// Downcast Box<dyn Exception> to a concrete exception type
     fn downcast<E: Exception>(self) -> E;
+    /// Try to downcast Box<dyn Exception> to a concrete exception type, if it fails it returns Self as Box<dyn Any>
+    fn try_downcast<E: Exception>(self) -> Result<E, Box<dyn Any>>;
 }
 impl ExceptionDowncast for Box<dyn Exception> {
-    fn downcast<T: 'static>(self) -> T {
-        *self
-            .into_any()
-            .downcast::<T>()
+    fn downcast<T: Exception + 'static>(self) -> T {
+        self.try_downcast()
             .expect("Downcasting failed, mismatched type")
     }
+    fn try_downcast<T: Exception + 'static>(self) -> Result<T, Box<dyn Any>> {
+        self.into_any().downcast::<T>().map(|this| *this)
+    }
 }
+
+macro_rules! impl_excpetion_for_primitives {
+    ($($etype: ty)+) => {
+        $(
+        impl Exception for $etype {
+            fn into_any(self: Box<Self>) -> Box<dyn Any> {
+                self
+            }
+            fn name(&self) -> &'static str {
+                stringify!($etype)
+            }
+        }
+        )+
+    };
+}
+impl_excpetion_for_primitives!(String &'static str);
 
 #[cfg(test)]
 mod test {
