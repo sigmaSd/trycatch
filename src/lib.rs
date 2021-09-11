@@ -136,22 +136,6 @@ impl ExceptionDowncast for Box<dyn Exception> {
     }
 }
 
-macro_rules! impl_excpetion_for_primitives {
-    ($($etype: ty)+) => {
-        $(
-        impl Exception for $etype {
-            fn into_any(self: Box<Self>) -> Box<dyn Any> {
-                self
-            }
-            fn name(&self) -> &'static str {
-                stringify!($etype)
-            }
-        }
-        )+
-    };
-}
-impl_excpetion_for_primitives!(String &'static str);
-
 #[cfg(test)]
 mod test {
     use super::*;
